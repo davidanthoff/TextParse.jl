@@ -318,3 +318,142 @@ function tryparsenext(q::Quoted{T,S,<:UInt8,<:UInt8}, str::Union{VectorBackedUTF
     @label error
     return Nullable{T}(), i
 end
+
+const INVALID_INDEX = 1000
+const pre_comp_1 = UInt16[fill(INVALID_INDEX, 47); [0,1,2,3,4,5,6,7,8,9]]
+const pre_comp_10 = UInt16[fill(INVALID_INDEX, 47); [0,10,20,30,40,50,60,70,80,90]]
+const pre_comp_100 = UInt16[fill(INVALID_INDEX, 47); [0,100,200,300,400,500,600,700,800,900]]
+const pre_comp_1000 = UInt16[fill(INVALID_INDEX, 47); [0,1000,2000,3000,4000,5000,6000,7000,8000,9000]]
+
+
+const tuple_pre_comp_1 = tuple(UInt16[fill(INVALID_INDEX, 47); [0,1,2,3,4,5,6,7,8,9]]...)
+const tuple_pre_comp_10 = tuple(UInt16[fill(INVALID_INDEX, 47); [0,10,20,30,40,50,60,70,80,90]]...)
+const tuple_pre_comp_100 = tuple(UInt16[fill(INVALID_INDEX, 47); [0,100,200,300,400,500,600,700,800,900]]...)
+const tuple_pre_comp_1000 = tuple(UInt16[fill(INVALID_INDEX, 47); [0,1000,2000,3000,4000,5000,6000,7000,8000,9000]]...)
+
+function foo(str, i0, len)
+    result = 0
+    
+    last_i = i0
+    
+
+    while last_i<len
+        @inbounds b = codeunit(str,last_i)
+        diff = b-0x30
+        diff >= UInt8(10) && break
+        last_i += 1
+    end
+
+    last_i -= 1
+
+    p_end = pointer(str, last_i)
+
+    i = i0
+
+    @inbounds while last_i-i + 1 > 3
+        result *= 10_000    
+
+        d1 = pre_comp_1000[codeunit(str, i)]
+        d2 = pre_comp_100[codeunit(str, i+1)]
+        d3 = pre_comp_10[codeunit(str, i+2)]
+        d4 = pre_comp_1[codeunit(str, i+3)]
+
+        # v = Vec{4,Int64}((pre_comp_1000[codeunit(str, i)], pre_comp_100[codeunit(str, i+1)], pre_comp_10[codeunit(str, i+2)], pre_comp_1[codeunit(str, i+3)]))
+
+        total = d1 + d2 + d3 + d4
+        # total = sum(v)
+
+        result += total
+        
+        i+=4
+    end
+
+    leftover_digits = last_i - i + 1
+
+    @inbounds if leftover_digits == 1
+        d1 = pre_comp_1[codeunit(str, i)]
+
+        result = result * 10 + d1
+    elseif leftover_digits == 2
+        d1 = pre_comp_10[codeunit(str, i)]
+        d2 = pre_comp_1[codeunit(str, i+1)]
+
+        result = result * 100 + d1 + d2
+    elseif leftover_digits == 3
+        d1 = pre_comp_100[codeunit(str, i)]
+        d2 = pre_comp_10[codeunit(str, i+1)]
+        d3 = pre_comp_1[codeunit(str, i+2)]
+
+        result = result * 1000 + d1 + d2 + d3
+    end
+
+    return result
+end
+
+
+function foo2(str, i0, len)
+    result = 0
+
+    end_index = pointer(str, len)
+    
+    p_end = pointer(str)
+    
+
+    while p_end<end_index
+        b = unsafe_load(p_end)
+        diff = b-0x30
+        diff >= UInt8(10) && break
+        p_end += 1
+    end
+
+    p_end -= 1
+
+    p = pointer(str)
+
+    @inbounds while p_end - p  >= 4
+        result *= 10_000    
+
+        d1 = tuple_pre_comp_1000[unsafe_load(p)]
+        d2 = tuple_pre_comp_100[unsafe_load(p, 1)]
+        d3 = tuple_pre_comp_10[unsafe_load(p, 2)]
+        d4 = tuple_pre_comp_1[unsafe_load(p, 3)]
+
+        # v = Vec{4,Int64}((pre_comp_1000[codeunit(str, i)], pre_comp_100[codeunit(str, i+1)], pre_comp_10[codeunit(str, i+2)], pre_comp_1[codeunit(str, i+3)]))
+        # v = Vec{4,Int64}((tuple_pre_comp_1000[unsafe_load(p)], tuple_pre_comp_100[unsafe_load(p, 1)],tuple_pre_comp_10[unsafe_load(p, 2)], tuple_pre_comp_1[unsafe_load(p, 3)]))
+
+        total = d1 + d2 + d3 + d4
+        # total = sum(v)
+
+        result += total
+        
+        p+=4
+    end
+
+    # leftover_digits = last_i - i + 1
+    leftover_digits = p_end - p
+
+    @inbounds if leftover_digits == 1
+        # d1 = tuple_pre_comp_1[codeunit(str, i)]
+        d1 = tuple_pre_comp_1[unsafe_load(p)]
+
+        result = result * 10 + d1
+    elseif leftover_digits == 2
+        # d1 = tuple_pre_comp_10[codeunit(str, i)]
+        # d2 = tuple_pre_comp_1[codeunit(str, i+1)]
+        d1 = tuple_pre_comp_10[unsafe_load(p)]
+        d2 = tuple_pre_comp_1[unsafe_load(p, 1)]
+
+        result = result * 100 + d1 + d2
+    elseif leftover_digits == 3
+        d1 = tuple_pre_comp_100[unsafe_load(p)]
+        d2 = tuple_pre_comp_10[unsafe_load(p, 1)]
+        d3 = tuple_pre_comp_1[unsafe_load(p, 2)]
+        # d1 = tuple_pre_comp_100[codeunit(str, i)]
+        # d2 = tuple_pre_comp_10[codeunit(str, i+1)]
+        # d3 = tuple_pre_comp_1[codeunit(str, i+2)]
+
+        result = result * 1000 + d1 + d2 + d3
+    end
+
+    return result
+end
